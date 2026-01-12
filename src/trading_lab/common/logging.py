@@ -11,13 +11,15 @@ from trading_lab.config.settings import get_settings
 def setup_logging(
     level: Optional[str] = None,
     log_file: Optional[Path] = None,
+    auto_log_file: bool = True,
 ) -> logging.Logger:
     """
     Set up logging configuration.
 
     Args:
         level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        log_file: Optional path to log file
+        log_file: Optional path to log file (if None and auto_log_file=True, creates one automatically)
+        auto_log_file: If True and log_file is None, automatically create log file in artifacts/logs
 
     Returns:
         Configured logger instance
@@ -42,7 +44,15 @@ def setup_logging(
     console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
 
-    # File handler if specified
+    # File handler
+    if log_file is None and auto_log_file:
+        # Auto-create log file in artifacts/logs directory
+        log_dir = settings.get_artifacts_dir() / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d")
+        log_file = log_dir / f"trading_lab_{timestamp}.log"
+
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(log_file)
@@ -53,6 +63,7 @@ def setup_logging(
         )
         file_handler.setFormatter(file_formatter)
         logger.addHandler(file_handler)
+        logger.info(f"Logging to file: {log_file}")
 
     return logger
 

@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,23 +32,33 @@ class Settings(BaseSettings):
     rbi_api_key: Optional[str] = None
 
     # Logging
-    log_level: str = "INFO"
+    log_level: str = Field(default="INFO", description="Logging level")
 
     # Trading parameters
-    max_position_per_asset: float = 0.1
-    max_gross_exposure: float = 1.0
-    transaction_cost_bps: float = 10.0
-    slippage_bps: float = 5.0
-    max_drawdown_threshold: float = 0.2
+    max_position_per_asset: float = Field(default=0.1, ge=0.0, le=1.0, description="Max position per asset (0-1)")
+    max_gross_exposure: float = Field(default=1.0, ge=0.0, description="Max gross exposure")
+    transaction_cost_bps: float = Field(default=10.0, ge=0.0, description="Transaction cost in basis points")
+    slippage_bps: float = Field(default=5.0, ge=0.0, description="Slippage in basis points")
+    max_drawdown_threshold: float = Field(default=0.2, ge=0.0, le=1.0, description="Max drawdown threshold (0-1)")
 
     # Model parameters
-    train_window_years: int = 2
-    test_window_months: int = 3
-    step_months: int = 1
+    train_window_years: int = Field(default=2, gt=0, description="Training window in years")
+    test_window_months: int = Field(default=3, gt=0, description="Test window in months")
+    step_months: int = Field(default=1, gt=0, description="Step size in months")
 
     # Feature engineering
-    feature_lookback_days: int = 60
-    min_price_change_threshold: float = 0.0005
+    feature_lookback_days: int = Field(default=60, gt=0, description="Feature lookback window in days")
+    min_price_change_threshold: float = Field(default=0.0005, ge=0.0, description="Min price change threshold")
+
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        """Validate log level."""
+        valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        v_upper = v.upper()
+        if v_upper not in valid_levels:
+            raise ValueError(f"log_level must be one of {valid_levels}, got {v}")
+        return v_upper
 
     def get_raw_data_dir(self) -> Path:
         """Get raw data directory path."""

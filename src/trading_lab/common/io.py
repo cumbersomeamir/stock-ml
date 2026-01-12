@@ -42,18 +42,28 @@ def load_dataframe(filepath: Path, format: Optional[str] = None) -> pd.DataFrame
 
     Returns:
         Loaded DataFrame
+
+    Raises:
+        FileNotFoundError: If file does not exist
+        ValueError: If format is unsupported or file is corrupted
     """
+    if not filepath.exists():
+        raise FileNotFoundError(f"File not found: {filepath}")
+
     if format is None:
         format = filepath.suffix[1:].lower()  # Remove dot
 
-    if format == "parquet":
-        return pd.read_parquet(filepath)
-    elif format == "csv":
-        return pd.read_csv(filepath, index_col=0, parse_dates=True)
-    elif format == "pkl":
-        return pd.read_pickle(filepath)
-    else:
-        raise ValueError(f"Unsupported format: {format}")
+    try:
+        if format == "parquet":
+            return pd.read_parquet(filepath)
+        elif format == "csv":
+            return pd.read_csv(filepath, index_col=0, parse_dates=True)
+        elif format == "pkl":
+            return pd.read_pickle(filepath)
+        else:
+            raise ValueError(f"Unsupported format: {format}")
+    except Exception as e:
+        raise ValueError(f"Failed to load DataFrame from {filepath}: {e}") from e
 
 
 def save_model(model: Any, filepath: Path) -> None:
@@ -77,8 +87,18 @@ def load_model(filepath: Path) -> Any:
 
     Returns:
         Loaded model
+
+    Raises:
+        FileNotFoundError: If file does not exist
+        ValueError: If file is corrupted or cannot be loaded
     """
-    return joblib.load(filepath)
+    if not filepath.exists():
+        raise FileNotFoundError(f"Model file not found: {filepath}")
+
+    try:
+        return joblib.load(filepath)
+    except Exception as e:
+        raise ValueError(f"Failed to load model from {filepath}: {e}") from e
 
 
 def save_json(data: dict, filepath: Path) -> None:
@@ -103,7 +123,19 @@ def load_json(filepath: Path) -> dict:
 
     Returns:
         Loaded dictionary
+
+    Raises:
+        FileNotFoundError: If file does not exist
+        ValueError: If file is not valid JSON
     """
-    with open(filepath, "r") as f:
-        return json.load(f)
+    if not filepath.exists():
+        raise FileNotFoundError(f"JSON file not found: {filepath}")
+
+    try:
+        with open(filepath, "r") as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in {filepath}: {e}") from e
+    except Exception as e:
+        raise ValueError(f"Failed to load JSON from {filepath}: {e}") from e
 

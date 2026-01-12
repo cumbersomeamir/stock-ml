@@ -1,8 +1,9 @@
 """Data schemas and types."""
 
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
+import pandas as pd
 from pydantic import BaseModel, Field
 
 
@@ -79,4 +80,27 @@ class BacktestResult(BaseModel):
         """Pydantic config."""
 
         from_attributes = True
+
+
+def validate_dataframe_columns(df: pd.DataFrame, required_columns: List[str], operation: str = "operation") -> None:
+    """
+    Validate that a DataFrame has all required columns.
+
+    Args:
+        df: DataFrame to validate
+        required_columns: List of required column names
+        operation: Description of the operation for error messages
+
+    Raises:
+        ValueError: If DataFrame is empty or missing required columns
+    """
+    if df.empty:
+        raise ValueError(f"DataFrame is empty for {operation}")
+
+    missing_cols = [col for col in required_columns if col not in df.columns]
+    if missing_cols:
+        raise ValueError(
+            f"DataFrame missing required columns for {operation}: {missing_cols}. "
+            f"Available columns: {list(df.columns)}"
+        )
 

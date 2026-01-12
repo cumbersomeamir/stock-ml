@@ -9,6 +9,7 @@ import pandas as pd
 from trading_lab.backtest.costs import calculate_transaction_cost
 from trading_lab.backtest.metrics import calculate_metrics
 from trading_lab.backtest.risk import apply_position_limits, check_circuit_breaker
+from trading_lab.common.schemas import validate_dataframe_columns
 from trading_lab.config.settings import get_settings
 from trading_lab.unify import unify_prices
 
@@ -66,6 +67,9 @@ class BacktestEngine:
         """
         logger.info("Starting backtest")
 
+        # Validate signals DataFrame
+        validate_dataframe_columns(signals_df, ["date", "ticker"], "backtest signals")
+
         # Load prices if not provided
         if price_df is None:
             price_df = unify_prices(force_refresh=False)
@@ -73,8 +77,15 @@ class BacktestEngine:
         if price_df.empty:
             raise ValueError("No price data available for backtesting")
 
+        # Validate price DataFrame
+        validate_dataframe_columns(price_df, ["date", "ticker", "adj_close"], "backtest prices")
+
         # Merge signals with prices
         data = signals_df.merge(price_df[["date", "ticker", "adj_close"]], on=["date", "ticker"], how="inner")
+        
+        if data.empty:
+            raise ValueError("No overlapping data between signals and prices. Check date ranges and tickers.")
+        
         data = data.sort_values(["date", "ticker"]).reset_index(drop=True)
 
         # Initialize state

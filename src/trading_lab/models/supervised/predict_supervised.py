@@ -46,12 +46,27 @@ def predict_supervised(
     # Load metrics to get feature columns
     from trading_lab.common.io import load_json
     metrics_path = models_dir / f"metrics_{model_name}.json"
+    if not metrics_path.exists():
+        raise FileNotFoundError(f"Metrics file not found: {metrics_path}. Train models first.")
+    
     metrics = load_json(metrics_path)
+    if "feature_cols" not in metrics:
+        raise ValueError(f"Metrics file missing 'feature_cols' key: {metrics_path}")
+    
     feature_cols = metrics["feature_cols"]
 
     # Load features if not provided
     if features_df is None:
         features_df = feature_store.load_features()
+
+    # Validate required columns
+    required_cols = ["date", "ticker"] + feature_cols
+    missing_cols = [col for col in required_cols if col not in features_df.columns]
+    if missing_cols:
+        raise ValueError(
+            f"Features DataFrame missing required columns: {missing_cols}. "
+            f"Available columns: {list(features_df.columns)}"
+        )
 
     # Prepare features
     X = features_df[feature_cols].fillna(0).values

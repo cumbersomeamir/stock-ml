@@ -38,8 +38,28 @@ def download_prices(
         trading-lab download-prices --tickers "AAPL,MSFT" --start 2018-01-01 --end 2024-12-31
         trading-lab download-prices --tickers "RELIANCE.NS,TCS.NS" --start 2018-01-01 --end 2024-12-31
     """
+    from datetime import datetime
+
+    # Validate date formats
+    try:
+        start_date = datetime.strptime(start, "%Y-%m-%d")
+        end_date = datetime.strptime(end, "%Y-%m-%d")
+    except ValueError as e:
+        console.print(f"[bold red]Invalid date format. Use YYYY-MM-DD format. Error: {e}[/bold red]")
+        raise typer.Exit(1)
+
+    # Validate date range
+    if start_date >= end_date:
+        console.print("[bold red]Start date must be before end date[/bold red]")
+        raise typer.Exit(1)
+
+    # Validate tickers
+    ticker_list = [t.strip() for t in tickers.split(",") if t.strip()]
+    if not ticker_list:
+        console.print("[bold red]No valid tickers provided[/bold red]")
+        raise typer.Exit(1)
+
     console.print("[bold green]Downloading price data...[/bold green]")
-    ticker_list = [t.strip() for t in tickers.split(",")]
 
     fetcher = YFinanceFetcher()
     df = fetcher.fetch(ticker_list, start, end, force_refresh=force_refresh)
@@ -89,6 +109,17 @@ def train_supervised_cmd(
         trading-lab train-supervised
         trading-lab train-supervised --model lightgbm --test-size 0.3
     """
+    # Validate test_size
+    if not 0.0 < test_size < 1.0:
+        console.print("[bold red]test-size must be between 0.0 and 1.0[/bold red]")
+        raise typer.Exit(1)
+
+    # Validate model_name
+    valid_models = ["logistic", "random_forest", "gradient_boosting", "lightgbm"]
+    if model_name not in valid_models:
+        console.print(f"[bold red]Invalid model name. Must be one of: {', '.join(valid_models)}[/bold red]")
+        raise typer.Exit(1)
+
     console.print(f"[bold green]Training supervised models: {model_name}...[/bold green]")
 
     try:

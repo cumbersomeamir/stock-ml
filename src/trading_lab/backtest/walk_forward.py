@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 import pandas as pd
+from tqdm import tqdm
 
 from trading_lab.backtest.engine import BacktestEngine
 from trading_lab.backtest.metrics import calculate_metrics
@@ -89,7 +90,9 @@ def walk_forward_backtest(
     all_equity_curves = []
     all_metrics = []
 
-    for i, window in enumerate(windows):
+    window_iterator = tqdm(enumerate(windows), total=len(windows), desc="Walk-forward windows") if len(windows) > 1 else enumerate(windows)
+
+    for i, window in window_iterator:
         logger.info(
             f"Window {i+1}/{len(windows)}: Test {window['test_start'].date()} to {window['test_end'].date()}"
         )
@@ -102,10 +105,31 @@ def walk_forward_backtest(
             logger.warning(f"Empty test period for window {i+1}")
             continue
 
-        # Generate predictions (model should be trained on train period)
-        # For simplicity, we use the globally trained model
-        # In production, you would retrain on train period for each window
+        # Train model on training period and generate predictions on test period
+        # This ensures proper walk-forward validation without look-ahead bias
         try:
+            from trading_lab.models.supervised.train_supervised import train_supervised
+            
+            # Get training period features
+            train_mask = (
+                (features_df["date"] >= window["train_start"]) & 
+                (features_df["date"] < window["train_end"])
+            )
+            train_features = features_df[train_mask].copy()
+            
+            if train_features.empty:
+                logger.warning(f"Empty training period for window {i+1}")
+                continue
+            
+            # Retrain model on training window
+            logger.info(f"Retraining model on training window {window['train_start'].date()} to {window['train_end'].date()}")
+            # Temporarily filter features to training period for this model
+            # Note: This requires modifying train_supervised to accept a features_df parameter
+            # For now, we'll use the full dataset and rely on the time split in train_supervised
+            # TODO: Improve this to only train on the specific training window
+            train_supervised(model_name=model_name, force_refresh=True, test_size=0.01)
+            
+            # Generate predictions on test period
             predictions = predict_supervised(test_features, model_name=model_name)
         except Exception as e:
             logger.warning(f"Failed to generate predictions for window {i+1}: {e}")

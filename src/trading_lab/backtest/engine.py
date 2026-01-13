@@ -1,10 +1,11 @@
 """Backtesting engine."""
 
 import logging
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from trading_lab.backtest.costs import calculate_transaction_cost
 from trading_lab.backtest.metrics import calculate_metrics
@@ -52,7 +53,8 @@ class BacktestEngine:
         self,
         signals_df: pd.DataFrame,
         price_df: Optional[pd.DataFrame] = None,
-        signal_function: Optional[Callable] = None,
+        signal_function: Optional[Callable[[pd.Series], float]] = None,
+        show_progress: bool = True,
     ) -> pd.DataFrame:
         """
         Run backtest.
@@ -116,12 +118,15 @@ class BacktestEngine:
             signal_function = default_signal_function
 
         # Process each date
-        dates = data["date"].unique()
-        dates = sorted(dates)
+        dates = sorted(data["date"].unique())
+        total_dates = len(dates)
+
+        logger.info(f"Processing {total_dates} trading days")
 
         circuit_breaker_triggered = False
+        date_iterator = tqdm(dates, desc="Backtesting", disable=not show_progress) if show_progress else dates
 
-        for date in dates:
+        for date in date_iterator:
             date_data = data[data["date"] == date].copy()
 
             # Check circuit breaker
@@ -184,11 +189,12 @@ class BacktestEngine:
                         entry_prices.pop(ticker, None)
                     else:
                         positions[ticker] = target_position
-                        # Update entry price (with slippage)
+                        # Update entry price (with slippage in basis points)
+                        slippage_multiplier = self.slippage_bps / 10000.0
                         if target_position > 0:
-                            entry_prices[ticker] = price * (1 + self.slippage_bps)
+                            entry_prices[ticker] = price * (1 + slippage_multiplier)
                         else:
-                            entry_prices[ticker] = price * (1 - self.slippage_bps)
+                            entry_prices[ticker] = price * (1 - slippage_multiplier)
 
             # Record equity curve point
             equity_curve.append(

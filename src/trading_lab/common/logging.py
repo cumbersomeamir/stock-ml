@@ -47,7 +47,7 @@ def setup_logging(
     # File handler
     if log_file is None and auto_log_file:
         # Auto-create log file in artifacts/logs directory
-        log_dir = settings.get_artifacts_dir() / "logs"
+        log_dir = settings.get_logs_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d")

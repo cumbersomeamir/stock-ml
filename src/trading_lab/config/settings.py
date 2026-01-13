@@ -1,6 +1,5 @@
 """Application settings and configuration."""
 
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -96,6 +95,10 @@ class Settings(BaseSettings):
         """Get reports directory path."""
         return self.get_artifacts_dir() / "reports"
 
+    def get_logs_dir(self) -> Path:
+        """Get logs directory path."""
+        return self.get_artifacts_dir() / "logs"
+
 
 _settings: Optional[Settings] = None
 
@@ -116,5 +119,6 @@ def get_settings() -> Settings:
         _settings.get_models_dir().mkdir(parents=True, exist_ok=True)
         _settings.get_backtests_dir().mkdir(parents=True, exist_ok=True)
         _settings.get_reports_dir().mkdir(parents=True, exist_ok=True)
+        _settings.get_logs_dir().mkdir(parents=True, exist_ok=True)
     return _settings
 

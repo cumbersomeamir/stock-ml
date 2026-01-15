@@ -8,7 +8,13 @@ import pandas as pd
 
 from trading_lab.common.io import load_dataframe, load_json, save_json
 from trading_lab.config.settings import get_settings
-from trading_lab.reports.plots import plot_drawdown, plot_equity_curve
+from trading_lab.reports.plots import (
+    plot_cumulative_returns,
+    plot_drawdown,
+    plot_equity_curve,
+    plot_monthly_returns,
+    plot_trade_distribution,
+)
 
 logger = logging.getLogger("trading_lab.reports")
 
@@ -62,9 +68,35 @@ def generate_report(strategy: Optional[str] = None) -> Dict:
     report_id = equity_file.stem.replace("equity_curve_", "")
     equity_plot_path = reports_dir / f"equity_curve_{report_id}.png"
     drawdown_plot_path = reports_dir / f"drawdown_{report_id}.png"
+    monthly_returns_path = reports_dir / f"monthly_returns_{report_id}.png"
+    cumulative_returns_path = reports_dir / f"cumulative_returns_{report_id}.png"
+    trade_dist_path = reports_dir / f"trade_distribution_{report_id}.png"
 
     plot_equity_curve(equity_df, equity_plot_path)
     plot_drawdown(equity_df, drawdown_plot_path)
+    plot_monthly_returns(equity_df, monthly_returns_path)
+    plot_cumulative_returns(equity_df, cumulative_returns_path)
+
+    # Plot trade distribution if available
+    if hasattr(equity_df, "attrs") and "trades" in equity_df.attrs:
+        trades_df = equity_df.attrs["trades"]
+        if not trades_df.empty:
+            plot_trade_distribution(trades_df, trade_dist_path)
+
+    # Add monthly returns statistics
+    equity_df_sorted = equity_df.sort_values("date").copy()
+    equity_df_sorted["returns"] = equity_df_sorted["capital"].pct_change()
+    monthly_returns_stats = {}
+    if not equity_df_sorted.empty:
+        equity_df_sorted["year_month"] = pd.to_datetime(equity_df_sorted["date"]).dt.to_period("M")
+        monthly_returns = equity_df_sorted.groupby("year_month")["returns"].sum()
+        monthly_returns_stats = {
+            "best_month": float(monthly_returns.max() * 100),
+            "worst_month": float(monthly_returns.min() * 100),
+            "avg_monthly_return": float(monthly_returns.mean() * 100),
+            "positive_months": int((monthly_returns > 0).sum()),
+            "total_months": len(monthly_returns),
+        }
 
     # Create report
     report = {
@@ -73,14 +105,25 @@ def generate_report(strategy: Optional[str] = None) -> Dict:
         "plots": {
             "equity_curve": str(equity_plot_path),
             "drawdown": str(drawdown_plot_path),
+            "monthly_returns": str(monthly_returns_path),
+            "cumulative_returns": str(cumulative_returns_path),
         },
         "summary": {
             "total_return": f"{metrics.get('total_return', 0)*100:.2f}%",
             "cagr": f"{metrics.get('cagr', 0)*100:.2f}%",
             "sharpe_ratio": f"{metrics.get('sharpe_ratio', 0):.2f}",
             "max_drawdown": f"{metrics.get('max_drawdown', 0)*100:.2f}%",
+            "total_trades": metrics.get("total_trades", "N/A"),
+            "win_rate": f"{metrics.get('win_rate', 0)*100:.2f}%" if metrics.get('win_rate') is not None else "N/A",
         },
+        "monthly_stats": monthly_returns_stats,
     }
+
+    # Add trade distribution plot if available
+    if hasattr(equity_df, "attrs") and "trades" in equity_df.attrs:
+        trades_df = equity_df.attrs["trades"]
+        if not trades_df.empty:
+            report["plots"]["trade_distribution"] = str(trade_dist_path)
 
     # Save report
     report_path = reports_dir / f"report_{report_id}.json"

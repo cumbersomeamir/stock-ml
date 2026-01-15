@@ -9,6 +9,7 @@ from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from trading_lab.backtest.walk_forward import walk_forward_backtest
+from trading_lab.cli_status import check_system_status, print_status_report
 from trading_lab.common.logging import setup_logging
 from trading_lab.data_sources.prices.yfinance_fetcher import YFinanceFetcher
 from trading_lab.features.build_features import build_features as build_features_fn
@@ -202,6 +203,7 @@ def backtest(
 @app.command()
 def report(
     strategy: Optional[str] = typer.Option(None, "--strategy", "-s", help="Strategy name (uses most recent if not specified)"),
+    export_csv: bool = typer.Option(False, "--export-csv", help="Export equity curve and trades to CSV"),
 ):
     """
     Generate backtest report with metrics and plots.
@@ -209,6 +211,7 @@ def report(
     Examples:
         trading-lab report
         trading-lab report --strategy supervised_prob_threshold
+        trading-lab report --export-csv
     """
     console.print("[bold green]Generating report...[/bold green]")
 
@@ -218,10 +221,78 @@ def report(
         console.print("\n[bold]Summary:[/bold]")
         for key, value in report_data["summary"].items():
             console.print(f"  {key}: {value}")
+        
+        if report_data.get("monthly_stats"):
+            console.print("\n[bold]Monthly Statistics:[/bold]")
+            monthly = report_data["monthly_stats"]
+            console.print(f"  Best Month: {monthly.get('best_month', 0):.2f}%")
+            console.print(f"  Worst Month: {monthly.get('worst_month', 0):.2f}%")
+            console.print(f"  Average Monthly Return: {monthly.get('avg_monthly_return', 0):.2f}%")
+            console.print(f"  Positive Months: {monthly.get('positive_months', 0)}/{monthly.get('total_months', 0)}")
+        
         console.print(f"\nReport saved to: {report_data['plots']['equity_curve']}")
+        
+        # Export CSV if requested
+        if export_csv:
+            from trading_lab.config.settings import get_settings
+            from trading_lab.common.io import load_dataframe
+            from pathlib import Path
+            
+            settings = get_settings()
+            reports_dir = settings.get_reports_dir()
+            
+            # Find the equity file used in the report
+            equity_files = list(settings.get_backtests_dir().glob(f"equity_curve_{strategy or '*'}_*.parquet"))
+            if not equity_files:
+                equity_files = list(settings.get_backtests_dir().glob("equity_curve_*.parquet"))
+            
+            if equity_files:
+                # Use the most recent one or the one matching strategy
+                if strategy:
+                    matching = [f for f in equity_files if strategy in f.stem]
+                    equity_file = max(matching, key=lambda p: p.stat().st_mtime) if matching else max(equity_files, key=lambda p: p.stat().st_mtime)
+                else:
+                    equity_file = max(equity_files, key=lambda p: p.stat().st_mtime)
+                
+                equity_df = load_dataframe(equity_file)
+                
+                # Export equity curve
+                report_id = equity_file.stem.replace("equity_curve_", "")
+                csv_path = reports_dir / f"equity_curve_{report_id}.csv"
+                equity_df.to_csv(csv_path, index=False)
+                console.print(f"[green]✓ Exported equity curve to: {csv_path}[/green]")
+                
+                # Export trades if available
+                if hasattr(equity_df, "attrs") and "trades" in equity_df.attrs:
+                    trades_df = equity_df.attrs["trades"]
+                    if not trades_df.empty:
+                        trades_csv = reports_dir / f"trades_{report_id}.csv"
+                        trades_df.to_csv(trades_csv, index=False)
+                        console.print(f"[green]✓ Exported trades to: {trades_csv}[/green]")
+            else:
+                console.print("[yellow]Warning: Could not find equity curve file to export[/yellow]")
     except Exception as e:
         console.print(f"[bold red]Error generating report: {e}[/bold red]")
         logger.exception("Error generating report")
+        raise typer.Exit(1)
+
+
+@app.command(name="status")
+def status_cmd():
+    """
+    Check system status and data availability.
+
+    Examples:
+        trading-lab status
+    """
+    console.print("[bold green]Checking system status...[/bold green]")
+    
+    try:
+        status = check_system_status()
+        print_status_report(status)
+    except Exception as e:
+        console.print(f"[bold red]Error checking status: {e}[/bold red]")
+        logger.exception("Error checking status")
         raise typer.Exit(1)
 
 

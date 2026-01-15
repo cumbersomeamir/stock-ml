@@ -10,6 +10,7 @@ from tqdm import tqdm
 from trading_lab.backtest.costs import calculate_transaction_cost
 from trading_lab.backtest.metrics import calculate_metrics
 from trading_lab.backtest.risk import apply_position_limits, check_circuit_breaker
+from trading_lab.backtest.trades import TradeTracker
 from trading_lab.common.schemas import validate_dataframe_columns
 from trading_lab.config.settings import get_settings
 from trading_lab.unify import unify_prices
@@ -95,6 +96,7 @@ class BacktestEngine:
         positions: Dict[str, float] = {}  # ticker -> position (fraction of capital)
         entry_prices: Dict[str, float] = {}  # ticker -> entry price
         peak_capital = self.initial_capital
+        trade_tracker = TradeTracker()
 
         equity_curve = []
 
@@ -183,11 +185,19 @@ class BacktestEngine:
                     capital -= cost
                     total_turnover += abs(position_change)
 
-                    # Update position
+                    # Update position and track trades
                     if abs(target_position) < 1e-6:
+                        # Close position
+                        if ticker in positions:
+                            trade_tracker.close_trade(ticker, date, price, capital)
                         positions.pop(ticker, None)
                         entry_prices.pop(ticker, None)
                     else:
+                        # Update or open position
+                        direction = 1 if target_position > 0 else -1
+                        trade_tracker.update_position(
+                            ticker, date, price, abs(target_position), direction, capital
+                        )
                         positions[ticker] = target_position
                         # Update entry price (with slippage in basis points)
                         slippage_multiplier = self.slippage_bps / 10000.0
@@ -208,7 +218,7 @@ class BacktestEngine:
             if circuit_breaker_triggered:
                 break
 
-        # Calculate final PnL for open positions
+        # Calculate final PnL for open positions and close them
         if dates and not circuit_breaker_triggered:
             last_date = dates[-1]
             last_data = data[data["date"] == last_date]
@@ -220,16 +230,35 @@ class BacktestEngine:
                         pnl_pct = (final_price - entry_prices[ticker]) / entry_prices[ticker]
                         pnl = position_value * pnl_pct
                         capital += pnl
+                        # Close trade
+                        trade_tracker.close_trade(ticker, last_date, final_price, capital)
 
         # Create equity curve DataFrame
         equity_df = pd.DataFrame(equity_curve)
         if not equity_df.empty:
             equity_df["date"] = pd.to_datetime(equity_df["date"])
 
+        # Add trade statistics to equity curve
+        trade_stats = trade_tracker.calculate_trade_statistics()
+        equity_df.attrs["trade_stats"] = trade_stats
+        equity_df.attrs["trades"] = trade_tracker.get_trades_df()
+
         # Calculate metrics
         metrics = calculate_metrics(equity_df, self.initial_capital)
+        
+        # Add trade statistics to metrics
+        metrics.update({
+            "trade_stats": trade_stats,
+            "total_trades": trade_stats["total_trades"],
+            "win_rate": trade_stats["win_rate"],
+        })
 
-        logger.info(f"Backtest complete: Final capital={capital:.2f}, Return={metrics.get('total_return', 0)*100:.2f}%")
+        logger.info(
+            f"Backtest complete: Final capital={capital:.2f}, "
+            f"Return={metrics.get('total_return', 0)*100:.2f}%, "
+            f"Trades={trade_stats['total_trades']}, "
+            f"Win Rate={trade_stats['win_rate']*100:.2f}%"
+        )
 
         return equity_df
 

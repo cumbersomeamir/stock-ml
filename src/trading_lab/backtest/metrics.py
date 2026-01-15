@@ -51,8 +51,10 @@ def calculate_metrics(equity_curve: pd.DataFrame, initial_capital: float) -> dic
     equity_curve["drawdown"] = (equity_curve["capital"] - equity_curve["cummax"]) / equity_curve["cummax"]
     max_drawdown = equity_curve["drawdown"].min()
 
-    # Win Rate (from trades, if available)
-    if "trade_pnl" in equity_curve.columns:
+    # Win Rate (from trades if available in attrs, otherwise from trade_pnl column)
+    if hasattr(equity_curve, "attrs") and "trade_stats" in equity_curve.attrs:
+        win_rate = equity_curve.attrs["trade_stats"].get("win_rate", np.nan)
+    elif "trade_pnl" in equity_curve.columns:
         trades = equity_curve[equity_curve["trade_pnl"] != 0]
         if len(trades) > 0:
             win_rate = (trades["trade_pnl"] > 0).sum() / len(trades)

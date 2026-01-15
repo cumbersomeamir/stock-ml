@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from trading_lab.common.io import load_dataframe, save_dataframe
+from trading_lab.common.validation import clean_price_data, validate_price_data
 from trading_lab.config.settings import get_settings
 
 logger = logging.getLogger("trading_lab.unify")
@@ -67,6 +68,16 @@ def unify_prices(force_refresh: bool = False) -> pd.DataFrame:
 
     # Ensure date is datetime
     unified["date"] = pd.to_datetime(unified["date"])
+    
+    # Validate and clean price data
+    validation_results = validate_price_data(unified)
+    if not validation_results["is_valid"]:
+        logger.warning(f"Price data validation issues: {validation_results['issues']}")
+        if validation_results["warnings"]:
+            logger.warning(f"Price data warnings: {validation_results['warnings']}")
+    
+    # Clean invalid data
+    unified = clean_price_data(unified, remove_invalid=True)
 
     # Infer exchange and currency from ticker
     def infer_exchange_currency(ticker: str) -> tuple[str, str]:

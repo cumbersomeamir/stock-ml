@@ -52,11 +52,21 @@ def train_supervised(
 
     # Load features
     features_df = feature_store.load_features()
+    if features_df.empty:
+        raise ValueError("No features available. Run build-features first.")
     logger.info(f"Loaded {len(features_df)} feature rows")
 
     # Generate targets
     targets_df = generate_targets(features_df)
+    if targets_df.empty:
+        raise ValueError("No targets generated. Check price data availability.")
     logger.info(f"Generated {len(targets_df)} target rows")
+    
+    # Validate data quality
+    if len(X_class) < 10:
+        raise ValueError(f"Insufficient training data: {len(X_class)} samples. Need at least 10.")
+    if len(X_reg) < 10:
+        raise ValueError(f"Insufficient regression data: {len(X_reg)} samples. Need at least 10.")
 
     # Merge features and targets
     data = features_df.merge(targets_df, on=["date", "ticker"], how="inner")
@@ -84,31 +94,55 @@ def train_supervised(
 
     # Time-series split (use simple split for now, can be improved with purged CV)
     n_train = int(len(X_class) * (1 - test_size))
+    if n_train < 5:
+        raise ValueError(f"Training set too small: {n_train} samples. Increase data or reduce test_size.")
     X_train_class, X_test_class = X_class[:n_train], X_class[n_train:]
     y_train_class, y_test_class = y_class_clean[:n_train], y_class_clean[n_train:]
 
     n_train_reg = int(len(X_reg) * (1 - test_size))
+    if n_train_reg < 5:
+        raise ValueError(f"Regression training set too small: {n_train_reg} samples.")
     X_train_reg, X_test_reg = X_reg[:n_train_reg], X_reg[n_train_reg:]
     y_train_reg, y_test_reg = y_reg_clean[:n_train_reg], y_reg_clean[n_train_reg:]
 
     # Train classifier
     logger.info("Training classifier")
     classifier = get_classifier(model_name)
-    classifier.fit(X_train_class, y_train_class)
-    y_pred_class = classifier.predict(X_test_class)
-    y_pred_proba = classifier.predict_proba(X_test_class)[:, 1] if hasattr(classifier, "predict_proba") else None
+    try:
+        classifier.fit(X_train_class, y_train_class)
+        y_pred_class = classifier.predict(X_test_class)
+        y_pred_proba = classifier.predict_proba(X_test_class)[:, 1] if hasattr(classifier, "predict_proba") else None
+    except Exception as e:
+        logger.error(f"Error training classifier: {e}")
+        raise ValueError(f"Failed to train classifier: {e}") from e
 
     # Train regressor
     logger.info("Training regressor")
     regressor = get_regressor(model_name)
-    regressor.fit(X_train_reg, y_train_reg)
-    y_pred_reg = regressor.predict(X_test_reg)
+    try:
+        regressor.fit(X_train_reg, y_train_reg)
+        y_pred_reg = regressor.predict(X_test_reg)
+    except Exception as e:
+        logger.error(f"Error training regressor: {e}")
+        raise ValueError(f"Failed to train regressor: {e}") from e
 
     # Calculate metrics
     accuracy = accuracy_score(y_test_class, y_pred_class)
     auc = roc_auc_score(y_test_class, y_pred_proba) if y_pred_proba is not None else None
     mse = mean_squared_error(y_test_reg, y_pred_reg)
     rmse = np.sqrt(mse)
+
+    # Get feature importance if available
+    feature_importance = None
+    if hasattr(classifier, "feature_importances_"):
+        feature_importance = {
+            feature_cols[i]: float(importance)
+            for i, importance in enumerate(classifier.feature_importances_)
+        }
+        # Sort by importance
+        feature_importance = dict(
+            sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)
+        )
 
     metrics = {
         "model_name": model_name,
@@ -125,6 +159,7 @@ def train_supervised(
             "n_test": int(len(X_test_reg)),
         },
         "feature_cols": feature_cols,
+        "feature_importance": feature_importance,
     }
 
     logger.info(f"Classification accuracy: {accuracy:.4f}, AUC: {auc:.4f if auc else 'N/A'}")

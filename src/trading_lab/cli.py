@@ -9,6 +9,7 @@ from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from trading_lab.backtest.walk_forward import walk_forward_backtest
+from trading_lab.cli_info import print_data_summary, print_feature_statistics
 from trading_lab.cli_status import check_system_status, print_status_report
 from trading_lab.common.logging import setup_logging
 from trading_lab.data_sources.prices.yfinance_fetcher import YFinanceFetcher
@@ -293,6 +294,28 @@ def status_cmd():
     except Exception as e:
         console.print(f"[bold red]Error checking status: {e}[/bold red]")
         logger.exception("Error checking status")
+        raise typer.Exit(1)
+
+
+@app.command(name="info")
+def info_cmd(
+    features: bool = typer.Option(False, "--features", help="Show feature statistics"),
+):
+    """
+    Show data information and statistics.
+
+    Examples:
+        trading-lab info
+        trading-lab info --features
+    """
+    try:
+        print_data_summary()
+        
+        if features:
+            print_feature_statistics()
+    except Exception as e:
+        console.print(f"[bold red]Error getting info: {e}[/bold red]")
+        logger.exception("Error in info command")
         raise typer.Exit(1)
 
 

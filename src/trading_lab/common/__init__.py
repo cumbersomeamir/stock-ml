@@ -2,10 +2,11 @@
 
 from trading_lab.common.logging import setup_logging
 from trading_lab.common.schemas import (
-    PriceData,
+    BacktestResult,
     EventData,
     FeatureData,
-    BacktestResult,
+    PriceData,
+    validate_dataframe_columns,
 )
 
 __all__ = [
@@ -14,5 +15,6 @@ __all__ = [
     "EventData",
     "FeatureData",
     "BacktestResult",
+    "validate_dataframe_columns",
 ]
 

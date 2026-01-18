@@ -12,6 +12,7 @@ from trading_lab.backtest.walk_forward import walk_forward_backtest
 from trading_lab.cli_info import print_data_summary, print_feature_statistics
 from trading_lab.cli_status import check_system_status, print_status_report
 from trading_lab.common.logging import setup_logging
+from trading_lab.common.reproducibility import ExperimentTracker
 from trading_lab.data_sources.prices.yfinance_fetcher import YFinanceFetcher
 from trading_lab.features.build_features import build_features as build_features_fn
 from trading_lab.models.supervised.train_supervised import train_supervised
@@ -103,6 +104,8 @@ def train_supervised_cmd(
     ),
     force_refresh: bool = typer.Option(False, "--force", "-f", help="Force retrain"),
     test_size: float = typer.Option(0.2, "--test-size", "-t", help="Test set proportion"),
+    random_seed: Optional[int] = typer.Option(42, "--seed", help="Random seed for reproducibility (None to disable)"),
+    check_bias: bool = typer.Option(True, "--check-bias/--no-check-bias", help="Check for look-ahead bias"),
 ):
     """
     Train supervised models for classification and regression.
@@ -110,6 +113,7 @@ def train_supervised_cmd(
     Examples:
         trading-lab train-supervised
         trading-lab train-supervised --model lightgbm --test-size 0.3
+        trading-lab train-supervised --seed 123 --check-bias
     """
     # Validate test_size
     if not 0.0 < test_size < 1.0:
@@ -123,9 +127,17 @@ def train_supervised_cmd(
         raise typer.Exit(1)
 
     console.print(f"[bold green]Training supervised models: {model_name}...[/bold green]")
+    if random_seed is not None:
+        console.print(f"[dim]Using random seed: {random_seed}[/dim]")
 
     try:
-        metrics = train_supervised(model_name=model_name, force_refresh=force_refresh, test_size=test_size)
+        metrics = train_supervised(
+            model_name=model_name,
+            force_refresh=force_refresh,
+            test_size=test_size,
+            random_seed=random_seed,
+            check_bias=check_bias,
+        )
         console.print("[bold green]✓ Training complete[/bold green]")
         console.print(f"  Classification Accuracy: {metrics['classification']['accuracy']:.4f}")
         if metrics['classification']['auc']:
@@ -316,6 +328,129 @@ def info_cmd(
     except Exception as e:
         console.print(f"[bold red]Error getting info: {e}[/bold red]")
         logger.exception("Error in info command")
+        raise typer.Exit(1)
+
+
+@app.command(name="run-pipeline")
+def run_pipeline_cmd(
+    skip_completed: bool = typer.Option(True, "--skip-completed/--no-skip", help="Skip completed tasks"),
+    stop_on_error: bool = typer.Option(False, "--stop-on-error", help="Stop on first error"),
+    track_experiment: bool = typer.Option(True, "--track/--no-track", help="Track as experiment"),
+    experiment_name: Optional[str] = typer.Option(None, "--experiment-name", "-n", help="Experiment name"),
+):
+    """
+    Run the complete data pipeline (unify -> features -> train -> backtest -> report).
+
+    This orchestrates the entire workflow with dependency tracking.
+
+    Examples:
+        trading-lab run-pipeline
+        trading-lab run-pipeline --stop-on-error
+        trading-lab run-pipeline --experiment-name my_experiment
+    """
+    console.print("[bold green]Running complete pipeline...[/bold green]")
+    
+    # Initialize experiment tracker
+    tracker = None
+    if track_experiment:
+        tracker = ExperimentTracker()
+        config = {
+            "skip_completed": skip_completed,
+            "stop_on_error": stop_on_error,
+        }
+        exp_name = experiment_name or f"pipeline_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        exp_id = tracker.start_experiment(
+            name=exp_name,
+            config=config,
+            description="Standard trading lab pipeline execution"
+        )
+        console.print(f"[dim]Tracking as experiment: {exp_id}[/dim]")
+    
+    try:
+        from trading_lab.common.pipeline import create_standard_pipeline
+        from datetime import datetime
+        
+        pipeline = create_standard_pipeline()
+        results = pipeline.run(skip_completed=skip_completed, stop_on_error=stop_on_error)
+        
+        console.print("[bold green]✓ Pipeline completed successfully[/bold green]")
+        
+        # Log to experiment tracker
+        if tracker:
+            tracker.log_metric("status", "completed")
+            if "backtest" in results and isinstance(results["backtest"], dict):
+                backtest_metrics = results["backtest"].get("metrics", {})
+                for key, value in backtest_metrics.items():
+                    if isinstance(value, (int, float)):
+                        tracker.log_metric(f"backtest_{key}", value)
+        
+        # Show performance summary
+        from trading_lab.common.performance import get_performance_monitor
+        monitor = get_performance_monitor()
+        
+        console.print("\n[bold]Performance Summary:[/bold]")
+        summary = monitor.get_summary()
+        for operation, stats in summary.items():
+            console.print(f"  {operation}: {stats['total_time']:.2f}s")
+        
+        # End experiment
+        if tracker:
+            tracker.end_experiment(status="completed", results={"pipeline_status": "success"})
+        
+    except Exception as e:
+        console.print(f"[bold red]Pipeline failed: {e}[/bold red]")
+        logger.exception("Pipeline error")
+        
+        if tracker:
+            tracker.log_metric("error", str(e))
+            tracker.end_experiment(status="failed")
+        
+        raise typer.Exit(1)
+
+
+@app.command(name="experiments")
+def experiments_cmd(
+    limit: int = typer.Option(10, "--limit", "-l", help="Number of experiments to show"),
+):
+    """
+    List recent experiments.
+
+    Examples:
+        trading-lab experiments
+        trading-lab experiments --limit 20
+    """
+    try:
+        tracker = ExperimentTracker()
+        experiments = tracker.list_experiments(limit=limit)
+        
+        if not experiments:
+            console.print("[yellow]No experiments found[/yellow]")
+            return
+        
+        console.print(f"\n[bold]Recent Experiments (showing {len(experiments)}):[/bold]")
+        
+        from rich.table import Table
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("ID", style="cyan")
+        table.add_column("Name")
+        table.add_column("Status")
+        table.add_column("Start Time")
+        
+        for exp in experiments:
+            exp_id_short = exp["id"][:16] + "..." if len(exp["id"]) > 16 else exp["id"]
+            status_color = "green" if exp["status"] == "completed" else "red" if exp["status"] == "failed" else "yellow"
+            table.add_row(
+                exp_id_short,
+                exp.get("name", "N/A"),
+                f"[{status_color}]{exp.get('status', 'unknown')}[/{status_color}]",
+                exp.get("start_time", "N/A")[:19]
+            )
+        
+        console.print(table)
+        
+    except Exception as e:
+        console.print(f"[bold red]Error listing experiments: {e}[/bold red]")
+        logger.exception("Error in experiments command")
         raise typer.Exit(1)
 
 

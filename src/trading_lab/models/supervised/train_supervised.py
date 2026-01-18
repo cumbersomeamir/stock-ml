@@ -9,7 +9,10 @@ import pandas as pd
 from sklearn.metrics import accuracy_score, mean_squared_error, roc_auc_score
 from sklearn.model_selection import TimeSeriesSplit
 
+from trading_lab.common.bias_checks import check_for_lookahead_bias
 from trading_lab.common.io import load_dataframe, save_json, save_model
+from trading_lab.common.performance import profile_function
+from trading_lab.common.reproducibility import set_random_seeds
 from trading_lab.config.settings import get_settings
 from trading_lab.features.feature_store import FeatureStore
 from trading_lab.labeling.targets import generate_targets
@@ -18,10 +21,13 @@ from trading_lab.models.supervised.model_zoo import get_classifier, get_regresso
 logger = logging.getLogger("trading_lab.models.supervised")
 
 
+@profile_function
 def train_supervised(
     model_name: str = "gradient_boosting",
     force_refresh: bool = False,
     test_size: float = 0.2,
+    random_seed: Optional[int] = 42,
+    check_bias: bool = True,
 ) -> Dict:
     """
     Train supervised models for classification and regression.
@@ -30,11 +36,17 @@ def train_supervised(
         model_name: Model name (see model_zoo for options)
         force_refresh: If True, retrain even if model exists
         test_size: Proportion of data to use for testing
+        random_seed: Random seed for reproducibility (None to disable)
+        check_bias: Whether to check for look-ahead bias
 
     Returns:
         Dictionary with training results and metrics
     """
     logger.info(f"Training supervised models: {model_name}")
+    
+    # Set random seeds for reproducibility
+    if random_seed is not None:
+        set_random_seeds(random_seed)
 
     settings = get_settings()
     models_dir = settings.get_models_dir()
@@ -62,11 +74,14 @@ def train_supervised(
         raise ValueError("No targets generated. Check price data availability.")
     logger.info(f"Generated {len(targets_df)} target rows")
     
-    # Validate data quality
-    if len(X_class) < 10:
-        raise ValueError(f"Insufficient training data: {len(X_class)} samples. Need at least 10.")
-    if len(X_reg) < 10:
-        raise ValueError(f"Insufficient regression data: {len(X_reg)} samples. Need at least 10.")
+    # Check for look-ahead bias if enabled
+    if check_bias:
+        bias_results = check_for_lookahead_bias(features_df, targets_df)
+        if bias_results["has_potential_bias"]:
+            logger.warning("⚠️ Potential look-ahead bias detected!")
+            for warning in bias_results["warnings"]:
+                logger.warning(f"  {warning}")
+            logger.warning("This may indicate features are using future information.")
 
     # Merge features and targets
     data = features_df.merge(targets_df, on=["date", "ticker"], how="inner")

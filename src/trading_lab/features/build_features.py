@@ -75,10 +75,33 @@ def build_features(force_refresh: bool = False, lookback_days: int = 60) -> pd.D
         fundamental_features["fundamental_pb"] = pd.NA
         fundamental_features["fundamental_dividend_yield"] = pd.NA
 
-    # Merge all features
-    logger.info("Merging all features")
-    features = price_features.merge(event_features, on=["date", "ticker"], how="left")
-    features = features.merge(fundamental_features, on=["date", "ticker"], how="left")
+    # Merge all features with proper time-series alignment
+    logger.info("Merging all features with time-series alignment")
+    from trading_lab.common.time_series import align_time_series, validate_temporal_consistency
+    
+    # Align all feature DataFrames
+    feature_dfs = [df for df in [price_features, event_features, fundamental_features] if not df.empty]
+    if feature_dfs:
+        features = align_time_series(
+            feature_dfs,
+            date_column="date",
+            ticker_column="ticker",
+            method="outer",
+            fill_method="ffill"
+        )
+    else:
+        features = price_features.copy()
+    
+    # Validate temporal consistency
+    validation = validate_temporal_consistency(
+        features,
+        check_ordering=True,
+        check_duplicates=True,
+        check_gaps=False  # Gaps are expected and handled by alignment
+    )
+    if validation["warnings"]:
+        for warning in validation["warnings"]:
+            logger.warning(f"Temporal consistency warning: {warning}")
 
     # Fill NaN values
     numeric_cols = features.select_dtypes(include=[float, int]).columns

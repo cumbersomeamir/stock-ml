@@ -115,6 +115,25 @@ def unify_prices(force_refresh: bool = False) -> pd.DataFrame:
 
     # Remove duplicates
     unified = unified.drop_duplicates(subset=["date", "ticker"], keep="last")
+    
+    # Validate temporal consistency
+    from trading_lab.common.time_series import validate_temporal_consistency, detect_gaps
+    
+    validation = validate_temporal_consistency(
+        unified,
+        check_ordering=True,
+        check_duplicates=True,
+        check_gaps=True
+    )
+    
+    if validation["issues"]:
+        for issue in validation["issues"]:
+            logger.warning(f"Temporal consistency issue: {issue}")
+    
+    if validation["warnings"]:
+        gaps = detect_gaps(unified)
+        if not gaps.empty:
+            logger.info(f"Detected {len(gaps)} gaps in price data (this is normal for market holidays)")
 
     logger.info(f"Unified {len(unified)} rows for {unified['ticker'].nunique()} tickers")
 

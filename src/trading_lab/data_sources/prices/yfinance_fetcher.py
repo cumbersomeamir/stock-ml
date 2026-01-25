@@ -9,6 +9,7 @@ import pandas as pd
 import yfinance as yf
 
 from trading_lab.common.io import load_dataframe, save_dataframe
+from trading_lab.common.resilience import retry
 from trading_lab.config.settings import get_settings
 
 logger = logging.getLogger("trading_lab.data_sources.prices")
@@ -60,11 +61,16 @@ class YFinanceFetcher:
                 except Exception as e:
                     logger.warning(f"Failed to load cache for {ticker}: {e}, re-downloading")
 
-            # Download data
-            try:
+            # Download data with retry logic
+            @retry(max_attempts=3, delay=1.0, backoff=2.0, exceptions=(Exception,))
+            def _fetch_ticker_data():
                 ticker_obj = yf.Ticker(ticker)
                 # Use auto_adjust=True to get adjusted prices
                 df = ticker_obj.history(start=start_date, end=end_date, auto_adjust=True)
+                return df
+            
+            try:
+                df = _fetch_ticker_data()
 
                 if df.empty:
                     logger.warning(f"No data found for {ticker}")
